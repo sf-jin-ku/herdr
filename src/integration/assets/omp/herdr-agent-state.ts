@@ -111,6 +111,10 @@ function sendState(state: AgentState, message?: string, seq = nextReportSeq()): 
       state,
       message,
       seq,
+      // omp runs inside the pi process, so this PID is the agent's. Lets herdr
+      // tell an interactive session rotation apart from a nested or headless
+      // run reusing the pane env.
+      agent_pid: process.pid,
     }),
   });
 }

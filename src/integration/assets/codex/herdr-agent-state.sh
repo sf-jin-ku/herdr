@@ -3,7 +3,7 @@
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # HERDR_INTEGRATION_ID=codex
-# HERDR_INTEGRATION_VERSION=5
+# HERDR_INTEGRATION_VERSION=6
 
 set -eu
 
@@ -22,7 +22,7 @@ esac
 [ -n "${HERDR_PANE_ID:-}" ] || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 
-HERDR_ACTION="$action" HERDR_HOOK_INPUT_FILE="$hook_input_file" python3 - <<'PY'
+HERDR_ACTION="$action" HERDR_AGENT_PID="$PPID" HERDR_HOOK_INPUT_FILE="$hook_input_file" python3 - <<'PY'
 import json
 import os
 import random
@@ -34,6 +34,11 @@ action = os.environ.get("HERDR_ACTION", "")
 pane_id = os.environ.get("HERDR_PANE_ID")
 socket_path = os.environ.get("HERDR_SOCKET_PATH")
 hook_input_file = os.environ.get("HERDR_HOOK_INPUT_FILE")
+# PID of the codex process (the hook shell's parent). Lets herdr tell an
+# interactive session rotation (`/new`, same process) apart from a nested or
+# headless run reusing the pane env.
+agent_pid = os.environ.get("HERDR_AGENT_PID")
+agent_pid = int(agent_pid) if agent_pid and agent_pid.isdigit() else None
 
 if not pane_id or not socket_path:
     raise SystemExit(0)
@@ -62,6 +67,7 @@ if agent_session_id:
             "agent": "codex",
             "seq": report_seq,
             "agent_session_id": agent_session_id,
+            "agent_pid": agent_pid,
         },
     }
 else:

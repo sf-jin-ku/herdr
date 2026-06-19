@@ -2,7 +2,7 @@
 // managed by herdr; reinstalling or updating the integration overwrites this file.
 // add custom hooks/plugins beside this file instead of editing it.
 // HERDR_INTEGRATION_ID=pi
-// HERDR_INTEGRATION_VERSION=2
+// HERDR_INTEGRATION_VERSION=3
 // @ts-nocheck
 
 import { createConnection } from "node:net";
@@ -111,6 +111,10 @@ function sendState(state: AgentState, message?: string, seq = nextReportSeq()): 
       state,
       message,
       seq,
+      // This plugin runs inside the pi process, so its PID is the agent's. Lets
+      // herdr tell an interactive session rotation apart from a nested or
+      // headless run reusing the pane env.
+      agent_pid: process.pid,
     }),
   });
 }

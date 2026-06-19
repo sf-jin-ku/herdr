@@ -1077,6 +1077,9 @@ fn pane_report_agent(args: &[String]) -> std::io::Result<i32> {
         seq,
         agent_session_id,
         agent_session_path,
+        // Set by the in-process socket hooks (.sh/.js/.ts/.py); the CLI path
+        // (used by Windows .ps1) does not report a PID yet.
+        agent_pid: None,
     }))
 }
 
@@ -1173,6 +1176,9 @@ fn pane_report_agent_session(args: &[String]) -> std::io::Result<i32> {
             agent_session_id,
             agent_session_path,
             session_start_source,
+            // Set by the in-process socket hooks; the CLI path (Windows .ps1)
+            // does not report a PID yet.
+            agent_pid: None,
         },
     ))
 }

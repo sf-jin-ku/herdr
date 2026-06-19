@@ -4779,6 +4779,7 @@ next_tab = ""
                 custom_status: None,
                 seq: None,
                 session_ref: None,
+                agent_pid: None,
             })
         );
         assert!(
@@ -7766,6 +7767,7 @@ next_tab = ""
                     seq: Some(19),
                     agent_session_id: None,
                     agent_session_path: None,
+                    agent_pid: None,
                 }),
             },
             respond_to,

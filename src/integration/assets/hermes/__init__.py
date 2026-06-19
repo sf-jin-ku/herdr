@@ -1,7 +1,7 @@
 """Hermes plugin installed by Herdr to report agent lifecycle state."""
 
 # HERDR_INTEGRATION_ID=hermes
-# HERDR_INTEGRATION_VERSION=2
+# HERDR_INTEGRATION_VERSION=3
 
 from __future__ import annotations
 
@@ -35,6 +35,10 @@ def _send(method: str, params: dict) -> None:
         "source": _SOURCE,
         "agent": _AGENT,
         "seq": time.time_ns(),
+        # This plugin runs inside the hermes process, so its PID is the agent's.
+        # Lets herdr tell an interactive session rotation apart from a nested or
+        # headless run reusing the pane env.
+        "agent_pid": os.getpid(),
         **params,
     }
     request = {

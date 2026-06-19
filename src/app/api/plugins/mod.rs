@@ -2214,6 +2214,7 @@ action = "missing"
                 seq: None,
                 agent_session_id: None,
                 agent_session_path: None,
+                agent_pid: None,
             },
         );
 

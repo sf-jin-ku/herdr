@@ -1212,6 +1212,7 @@ impl App {
             message: params.message,
             custom_status: normalize_custom_status(params.custom_status),
             seq: params.seq,
+            agent_pid: params.agent_pid,
         });
 
         encode_success(id, ResponseResult::Ok {})
@@ -1242,6 +1243,7 @@ impl App {
             session_start_source: crate::agent_resume::normalize_claude_session_start_source(
                 params.session_start_source,
             ),
+            agent_pid: params.agent_pid,
         });
 
         encode_success(id, ResponseResult::Ok {})

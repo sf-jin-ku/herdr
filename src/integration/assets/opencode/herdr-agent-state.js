@@ -2,7 +2,7 @@
 // managed by herdr; reinstalling or updating the integration overwrites this file.
 // add custom hooks/plugins beside this file instead of editing it.
 // HERDR_INTEGRATION_ID=opencode
-// HERDR_INTEGRATION_VERSION=5
+// HERDR_INTEGRATION_VERSION=6
 
 import net from "node:net";
 
@@ -59,6 +59,10 @@ function request(method, params) {
       source: SOURCE,
       agent: AGENT,
       seq: nextReportSeq(),
+      // This plugin runs inside the opencode process, so its PID is the agent's.
+      // Lets herdr tell an interactive session rotation apart from a nested or
+      // headless run reusing the pane env.
+      agent_pid: process.pid,
       ...params,
     },
   };

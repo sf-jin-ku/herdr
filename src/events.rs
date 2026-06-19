@@ -76,6 +76,10 @@ pub enum AppEvent {
         custom_status: Option<String>,
         seq: Option<u64>,
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
+        /// PID of the reporting agent process (the hook's parent, or the
+        /// plugin's own process). Used to tell an interactive session rotation
+        /// apart from a nested/headless clobber.
+        agent_pid: Option<u32>,
     },
     /// Agent session identity was reported without state authority.
     AgentSessionReported {
@@ -85,6 +89,8 @@ pub enum AppEvent {
         seq: Option<u64>,
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
         session_start_source: Option<String>,
+        /// PID of the reporting agent process (see `HookStateReported`).
+        agent_pid: Option<u32>,
     },
     /// Display-only agent metadata was reported for a pane.
     HookMetadataReported {

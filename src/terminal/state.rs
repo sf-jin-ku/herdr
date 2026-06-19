@@ -80,6 +80,11 @@ pub struct TerminalState {
     pub hook_authority: Option<HookAuthority>,
     pub agent_metadata: HashMap<String, AgentMetadata>,
     pub persisted_agent_session: Option<crate::agent_resume::PersistedAgentSession>,
+    /// PID of the agent process that owns the current session ref. Runtime-only
+    /// (never persisted): used to tell an interactive session rotation (same
+    /// process, e.g. codex `/new`) apart from a nested/headless clobber (a
+    /// different process reusing the pane env).
+    agent_session_authority_pid: Option<u32>,
     pub manual_label: Option<String>,
     pub agent_name: Option<String>,
     hook_report_sequences: HashMap<String, u64>,
@@ -106,6 +111,7 @@ impl TerminalState {
             hook_authority: None,
             agent_metadata: HashMap::new(),
             persisted_agent_session: None,
+            agent_session_authority_pid: None,
             manual_label: None,
             agent_name: None,
             hook_report_sequences: HashMap::new(),
@@ -335,6 +341,7 @@ impl TerminalState {
         .and_then(|mutation| mutation.effective_state_change)
     }
 
+    #[cfg(test)]
     pub fn set_hook_authority_with_session_ref(
         &mut self,
         source: String,
@@ -345,7 +352,7 @@ impl TerminalState {
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
         seq: Option<u64>,
     ) -> Option<TerminalStateMutation> {
-        self.set_hook_authority_with_custom_status_at(
+        self.set_hook_authority_with_session_ref_and_pid(
             source,
             agent_label,
             state,
@@ -353,10 +360,39 @@ impl TerminalState {
             custom_status,
             session_ref,
             seq,
+            None,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_hook_authority_with_session_ref_and_pid(
+        &mut self,
+        source: String,
+        agent_label: String,
+        state: AgentState,
+        message: Option<String>,
+        custom_status: Option<String>,
+        session_ref: Option<crate::agent_resume::AgentSessionRef>,
+        seq: Option<u64>,
+        agent_pid: Option<u32>,
+        previous_authority_alive: bool,
+    ) -> Option<TerminalStateMutation> {
+        self.set_hook_authority_with_custom_status_at_with_pid(
+            source,
+            agent_label,
+            state,
+            message,
+            custom_status,
+            session_ref,
+            seq,
+            agent_pid,
+            previous_authority_alive,
             Instant::now(),
         )
     }
 
+    #[cfg(test)]
     pub fn set_hook_authority_with_custom_status_at(
         &mut self,
         source: String,
@@ -366,6 +402,34 @@ impl TerminalState {
         custom_status: Option<String>,
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
         seq: Option<u64>,
+        now: Instant,
+    ) -> Option<TerminalStateMutation> {
+        self.set_hook_authority_with_custom_status_at_with_pid(
+            source,
+            agent_label,
+            state,
+            message,
+            custom_status,
+            session_ref,
+            seq,
+            None,
+            false,
+            now,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_hook_authority_with_custom_status_at_with_pid(
+        &mut self,
+        source: String,
+        agent_label: String,
+        state: AgentState,
+        message: Option<String>,
+        custom_status: Option<String>,
+        session_ref: Option<crate::agent_resume::AgentSessionRef>,
+        seq: Option<u64>,
+        agent_pid: Option<u32>,
+        previous_authority_alive: bool,
         now: Instant,
     ) -> Option<TerminalStateMutation> {
         if self.full_lifecycle_hook_report_is_suppressed(&source, &agent_label, &session_ref) {
@@ -391,14 +455,29 @@ impl TerminalState {
         if self.known_agent_label_conflicts_with_detected_agent(&agent_label) {
             return None;
         }
-        let session_ref = session_ref.map(|session_ref| {
-            self.conflicting_current_session_ref(&source, &agent_label, &session_ref, None)
-                .unwrap_or(session_ref)
-        });
+        let (session_ref, accepted_incoming) = match session_ref {
+            Some(incoming) => match self.conflicting_current_session_ref(
+                &source,
+                &agent_label,
+                &incoming,
+                None,
+                agent_pid,
+                previous_authority_alive,
+            ) {
+                // Conflict: keep the current restore target, drop the incoming
+                // clobber. Authority PID stays with the existing owner.
+                Some(kept) => (Some(kept), false),
+                // The incoming ref cleared the conflict check.
+                None => (Some(incoming), true),
+            },
+            None => (None, false),
+        };
         if self.live_full_lifecycle_hook_authority_conflicts_with_session(
             &source,
             &agent_label,
             &session_ref,
+            agent_pid,
+            previous_authority_alive,
         ) {
             return None;
         }
@@ -436,6 +515,15 @@ impl TerminalState {
             session_ref,
         });
         let current_session = self.current_session_identity_for_persistence();
+        // Take ownership only when an accepted report actually establishes or
+        // changes the session identity. A kept clobber or a same-ref echo from
+        // another process must not move authority off the live owner (otherwise
+        // that process could later "rotate" the session and bypass the guard).
+        if accepted_incoming
+            && self.should_claim_session_authority(previous_session != current_session)
+        {
+            self.agent_session_authority_pid = agent_pid;
+        }
         Some(TerminalStateMutation {
             effective_state_change: self.recompute_effective_state(
                 previous_agent_label,
@@ -676,6 +764,8 @@ impl TerminalState {
         source: &str,
         agent_label: &str,
         session_ref: &Option<crate::agent_resume::AgentSessionRef>,
+        incoming_pid: Option<u32>,
+        previous_authority_alive: bool,
     ) -> bool {
         let Some(authority) = self.hook_authority.as_ref() else {
             return false;
@@ -687,11 +777,18 @@ impl TerminalState {
         if authority.source != source || authority.agent_label != agent_label {
             return false;
         }
-        authority
+        let refs_differ = authority
             .session_ref
             .as_ref()
             .zip(session_ref.as_ref())
-            .is_some_and(|(current, incoming)| current != incoming)
+            .is_some_and(|(current, incoming)| current != incoming);
+        // A full-lifecycle agent (no Agent process identity, so the conflict
+        // check above abstains for path refs) normally cannot change its session
+        // ref in place. But the owning process rotating its own session, or a
+        // fresh process taking over once the previous owner exited, is
+        // legitimate — only an unauthorized different ref (a live foreign
+        // process) is a real conflict.
+        refs_differ && !self.pid_authorizes_session_change(incoming_pid, previous_authority_alive)
     }
 
     fn clear_full_lifecycle_hook_suppression_for_detected_agent(
@@ -802,26 +899,76 @@ impl TerminalState {
         })
     }
 
+    /// Whether process-identity evidence authorizes changing the pane's session
+    /// ref off the current owner: either the same process that established it is
+    /// rotating its own session, or the previous owner has exited and a fresh
+    /// process is taking over. A different, still-running process is never
+    /// authorized — that is the nested/headless clobber we reject. With no PID
+    /// (`None`) there is no evidence, so authority is never granted and the
+    /// prior (#511 / #614) behavior is preserved exactly.
+    fn pid_authorizes_session_change(
+        &self,
+        incoming_pid: Option<u32>,
+        previous_authority_alive: bool,
+    ) -> bool {
+        let Some(incoming_pid) = incoming_pid else {
+            return false;
+        };
+        if self.agent_session_authority_pid == Some(incoming_pid) {
+            return true;
+        }
+        self.agent_session_authority_pid.is_some() && !previous_authority_alive
+    }
+
+    /// Whether a just-accepted report should take session ownership: it changed
+    /// the session identity, or no owner is currently recorded. A same-ref echo
+    /// while an owner is already known leaves authority where it is, so a foreign
+    /// process cannot inherit ownership just by re-reporting the current id.
+    fn should_claim_session_authority(&self, session_changed: bool) -> bool {
+        session_changed || self.agent_session_authority_pid.is_none()
+    }
+
     fn conflicting_current_session_ref(
         &self,
         source: &str,
         agent_label: &str,
         session_ref: &crate::agent_resume::AgentSessionRef,
         session_start_source: Option<&str>,
+        incoming_pid: Option<u32>,
+        previous_authority_alive: bool,
     ) -> Option<crate::agent_resume::AgentSessionRef> {
         self.current_session_identity_for_persistence().and_then(
             |(current_source, current_agent, current_kind, current_value)| {
-                (current_source == source
+                let is_conflict = current_source == source
                     && current_agent == agent_label
                     && current_kind == crate::agent_resume::AgentSessionRefKind::Id
                     && session_ref.kind == crate::agent_resume::AgentSessionRefKind::Id
-                    && (current_kind != session_ref.kind || current_value != session_ref.value)
-                    && !Self::session_start_source_allows_session_replacement(
-                        source,
-                        agent_label,
-                        session_start_source,
-                    ))
-                .then_some(crate::agent_resume::AgentSessionRef {
+                    && (current_kind != session_ref.kind || current_value != session_ref.value);
+                if !is_conflict {
+                    return None;
+                }
+                // Claude's SessionStart `source` distinguishes an interactive
+                // rotation (/clear, /resume, compaction) from a nested clobber,
+                // so honor it when the hook forwards it.
+                if Self::session_start_source_allows_session_replacement(
+                    source,
+                    agent_label,
+                    session_start_source,
+                ) {
+                    return None;
+                }
+                // Process-identity authority: agents like codex reuse `source`
+                // ("startup") for `/new`, so source cannot tell a legitimate
+                // rotation apart from a clobber. The owning agent process can,
+                // though — the exact PID that established the session may rotate
+                // it, and a fresh foreground agent may take over once the
+                // previous owner has exited. A different, still-running process
+                // reusing the pane env (nested or cco-style headless preflight)
+                // is rejected so it cannot overwrite the restore target.
+                if self.pid_authorizes_session_change(incoming_pid, previous_authority_alive) {
+                    return None;
+                }
+                Some(crate::agent_resume::AgentSessionRef {
                     kind: current_kind,
                     value: current_value,
                 })
@@ -846,6 +993,14 @@ impl TerminalState {
         self.persisted_agent_session = Some(session);
     }
 
+    /// PID of the process that owns the current session ref, if known. The app
+    /// layer uses it to decide whether a conflicting report comes from a still
+    /// running owner (reject) or a dead one whose pane can be taken over.
+    pub fn current_session_authority_pid(&self) -> Option<u32> {
+        self.agent_session_authority_pid
+    }
+
+    #[cfg(test)]
     pub fn set_agent_session_ref(
         &mut self,
         source: String,
@@ -853,9 +1008,18 @@ impl TerminalState {
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
         seq: Option<u64>,
     ) -> Option<TerminalStateMutation> {
-        self.set_agent_session_ref_for_session_start(source, agent_label, session_ref, seq, None)
+        self.set_agent_session_ref_for_session_start_with_pid(
+            source,
+            agent_label,
+            session_ref,
+            seq,
+            None,
+            None,
+            false,
+        )
     }
 
+    #[cfg(test)]
     pub fn set_agent_session_ref_for_session_start(
         &mut self,
         source: String,
@@ -863,6 +1027,28 @@ impl TerminalState {
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
         seq: Option<u64>,
         session_start_source: Option<String>,
+    ) -> Option<TerminalStateMutation> {
+        self.set_agent_session_ref_for_session_start_with_pid(
+            source,
+            agent_label,
+            session_ref,
+            seq,
+            session_start_source,
+            None,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_agent_session_ref_for_session_start_with_pid(
+        &mut self,
+        source: String,
+        agent_label: String,
+        session_ref: Option<crate::agent_resume::AgentSessionRef>,
+        seq: Option<u64>,
+        session_start_source: Option<String>,
+        agent_pid: Option<u32>,
+        previous_authority_alive: bool,
     ) -> Option<TerminalStateMutation> {
         let session_ref = session_ref?;
         if !self.accept_hook_report(&source, seq) {
@@ -877,6 +1063,8 @@ impl TerminalState {
                 &agent_label,
                 &session_ref,
                 session_start_source.as_deref(),
+                agent_pid,
+                previous_authority_alive,
             )
             .is_some()
         {
@@ -890,6 +1078,13 @@ impl TerminalState {
             session_ref,
         });
         let current_session = self.current_session_identity_for_persistence();
+        // Take ownership only when this report actually changes the session
+        // identity or no owner is known. A same-ref echo from another live
+        // process must not transfer authority off the owner that established it,
+        // or that process could later rotate the session and bypass the guard.
+        if self.should_claim_session_authority(previous_session != current_session) {
+            self.agent_session_authority_pid = agent_pid;
+        }
         Some(TerminalStateMutation {
             effective_state_change: None,
             session_ref_changed: previous_session != current_session,
@@ -1193,6 +1388,72 @@ mod tests {
             .join(name)
             .display()
             .to_string()
+    }
+
+    fn sid(value: &str) -> Option<crate::agent_resume::AgentSessionRef> {
+        crate::agent_resume::AgentSessionRef::id(value)
+    }
+
+    fn spath(name: &str) -> Option<crate::agent_resume::AgentSessionRef> {
+        crate::agent_resume::AgentSessionRef::path(test_session_path(name))
+    }
+
+    /// codex-style report: session identity announced on session start, anchored
+    /// to the reporting process's pid.
+    fn start_pid(
+        terminal: &mut TerminalState,
+        agent: &str,
+        session_ref: Option<crate::agent_resume::AgentSessionRef>,
+        seq: u64,
+        pid: u32,
+        previous_authority_alive: bool,
+    ) -> Option<TerminalStateMutation> {
+        terminal.set_agent_session_ref_for_session_start_with_pid(
+            format!("herdr:{agent}"),
+            agent.into(),
+            session_ref,
+            Some(seq),
+            None,
+            Some(pid),
+            previous_authority_alive,
+        )
+    }
+
+    /// pi/omp/hermes-style full-lifecycle report, anchored to the reporting pid.
+    fn report_pid(
+        terminal: &mut TerminalState,
+        agent: &str,
+        session_ref: Option<crate::agent_resume::AgentSessionRef>,
+        seq: u64,
+        pid: u32,
+        previous_authority_alive: bool,
+    ) -> Option<TerminalStateMutation> {
+        terminal.set_hook_authority_with_session_ref_and_pid(
+            format!("herdr:{agent}"),
+            agent.into(),
+            AgentState::Working,
+            None,
+            None,
+            session_ref,
+            Some(seq),
+            Some(pid),
+            previous_authority_alive,
+        )
+    }
+
+    fn persisted_value(terminal: &TerminalState) -> Option<&str> {
+        terminal
+            .persisted_agent_session
+            .as_ref()
+            .map(|session| session.session_ref.value.as_str())
+    }
+
+    fn hook_value(terminal: &TerminalState) -> Option<&str> {
+        terminal
+            .hook_authority
+            .as_ref()
+            .and_then(|authority| authority.session_ref.as_ref())
+            .map(|session_ref| session_ref.value.as_str())
     }
 
     #[test]
@@ -3151,6 +3412,140 @@ mod tests {
                 .map(|session| session.session_ref.value.as_str()),
             Some("claude-session")
         );
+    }
+
+    #[test]
+    fn codex_session_start_pid_authority() {
+        // codex reports a new session id on the "startup" source — the same
+        // shape as a nested/headless clobber — so only the PID distinguishes a
+        // legitimate `/new` rotation from a process that must not take over.
+        // (incoming pid, previous owner alive, accepted, expected persisted id)
+        let cases = [
+            // codex `/new`: the same process rotates to a new id.
+            (4242, true, true, "codex-new"),
+            // A nested/headless run (different live pid) must not clobber.
+            (9999, true, false, "codex-first"),
+            // The previous owner exited; a fresh foreground agent takes over.
+            (9999, false, true, "codex-new"),
+        ];
+
+        for (pid, previous_authority_alive, accepted, expected) in cases {
+            let label = format!("pid={pid} previous_authority_alive={previous_authority_alive}");
+            let mut terminal = test_terminal();
+            start_pid(&mut terminal, "codex", sid("codex-first"), 20, 4242, false)
+                .expect("initial codex session should be accepted");
+
+            let mutation = start_pid(
+                &mut terminal,
+                "codex",
+                sid("codex-new"),
+                21,
+                pid,
+                previous_authority_alive,
+            );
+
+            assert_eq!(mutation.is_some(), accepted, "{label}");
+            if let Some(mutation) = mutation {
+                assert!(mutation.session_ref_changed, "{label}");
+            }
+            assert_eq!(persisted_value(&terminal), Some(expected), "{label}");
+        }
+    }
+
+    #[test]
+    fn same_session_ref_echo_from_other_pid_does_not_transfer_authority() {
+        // A different, still-running process that echoes the current session id
+        // must not steal ownership — otherwise it could then "rotate" to a new
+        // id and bypass the clobber guard.
+        let mut terminal = test_terminal();
+        start_pid(
+            &mut terminal,
+            "codex",
+            sid("codex-session"),
+            20,
+            4242,
+            false,
+        )
+        .expect("initial codex session should be accepted");
+
+        // Same id from a different live process: ownership must stay with 4242.
+        start_pid(&mut terminal, "codex", sid("codex-session"), 21, 9999, true);
+        assert_eq!(terminal.current_session_authority_pid(), Some(4242));
+
+        // pid 9999 now tries to rotate to a new id while 4242 is still alive.
+        let clobber = start_pid(&mut terminal, "codex", sid("codex-stolen"), 22, 9999, true);
+        assert!(clobber.is_none());
+        assert_eq!(persisted_value(&terminal), Some("codex-session"));
+    }
+
+    #[test]
+    fn rejected_full_lifecycle_report_does_not_move_session_authority() {
+        // A live foreign process is rejected by the full-lifecycle guard; that
+        // rejected report must not leave authority pointing at the reporter
+        // (the bug was assigning authority before the rejection gate).
+        let mut terminal = test_terminal();
+        report_pid(&mut terminal, "pi", spath("one.jsonl"), 20, 4242, false)
+            .expect("initial pi session should be accepted");
+
+        // Different ref from a still-running foreign process (owner alive).
+        let rejected = report_pid(&mut terminal, "pi", spath("two.jsonl"), 21, 9999, true);
+        assert!(rejected.is_none());
+        assert_eq!(terminal.current_session_authority_pid(), Some(4242));
+    }
+
+    #[test]
+    fn full_lifecycle_takeover_after_owner_exits_with_pid() {
+        // Full-lifecycle agents (pi/omp, path refs) bypass the Id conflict check
+        // and rely on the live-authority guard. With PID evidence, a live foreign
+        // process still can't clobber, but a fresh process can take over once the
+        // owner has exited — instead of being stuck behind the old authority.
+        let mut terminal = test_terminal();
+        report_pid(&mut terminal, "pi", spath("one.jsonl"), 20, 4242, false)
+            .expect("initial pi session should be accepted");
+
+        // Owner 4242 still alive: a different live process must not clobber.
+        let clobber = report_pid(&mut terminal, "pi", spath("nested.jsonl"), 21, 9999, true);
+        assert!(clobber.is_none());
+        assert_eq!(
+            hook_value(&terminal),
+            Some(test_session_path("one.jsonl").as_str())
+        );
+
+        // Owner 4242 has exited: a fresh pi takes over with a new session.
+        report_pid(&mut terminal, "pi", spath("two.jsonl"), 22, 9999, false)
+            .expect("a fresh pi should take over once the previous owner exits");
+        assert_eq!(
+            hook_value(&terminal),
+            Some(test_session_path("two.jsonl").as_str())
+        );
+        assert_eq!(terminal.current_session_authority_pid(), Some(9999));
+    }
+
+    #[test]
+    fn hook_authority_preserves_session_ref_against_different_pid_clobber() {
+        // On the report_agent path (pi/omp/hermes/kilo/opencode) a still-running
+        // foreign process must not overwrite the restore target. The pane state
+        // may still update, but the persisted session ref stays put.
+        let mut terminal = test_terminal();
+        report_pid(
+            &mut terminal,
+            "hermes",
+            sid("hermes-first"),
+            20,
+            4242,
+            false,
+        )
+        .expect("initial hermes session should be accepted");
+
+        report_pid(
+            &mut terminal,
+            "hermes",
+            sid("hermes-nested"),
+            21,
+            9999,
+            true,
+        );
+        assert_eq!(hook_value(&terminal), Some("hermes-first"));
     }
 
     #[test]

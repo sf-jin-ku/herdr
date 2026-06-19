@@ -17,6 +17,23 @@ use super::state::{
     ToastNotification, ToastTarget, ViewLayout,
 };
 
+/// Whether the process that owns the pane's current session ref is still
+/// running. Only meaningful (and only worth a syscall) when the incoming report
+/// comes from a *different* PID — that is the sole case where the session-ref
+/// conflict check needs to decide between a clobber (owner alive) and a takeover
+/// (owner gone). Same-PID rotations and first reports never reach the syscall.
+fn previous_session_authority_alive(
+    terminal: &crate::terminal::TerminalState,
+    incoming_pid: Option<u32>,
+) -> bool {
+    match (incoming_pid, terminal.current_session_authority_pid()) {
+        (Some(incoming), Some(current)) if incoming != current => {
+            crate::platform::process_exists(current)
+        }
+        _ => false,
+    }
+}
+
 fn is_background_completion_transition(prev_state: AgentState, new_state: AgentState) -> bool {
     matches!(new_state, AgentState::Idle)
         && matches!(prev_state, AgentState::Working | AgentState::Blocked)
@@ -2412,16 +2429,29 @@ impl AppState {
                 custom_status,
                 seq,
                 session_ref,
+                agent_pid,
             } => {
                 if crate::agent_resume::is_reserved_native_state_source(&source, &agent_label) {
                     self.update_terminal_state(pane_id, |terminal| {
-                        terminal.set_agent_session_ref(source, agent_label, session_ref, seq)
+                        let previous_authority_alive =
+                            previous_session_authority_alive(terminal, agent_pid);
+                        terminal.set_agent_session_ref_for_session_start_with_pid(
+                            source,
+                            agent_label,
+                            session_ref,
+                            seq,
+                            None,
+                            agent_pid,
+                            previous_authority_alive,
+                        )
                     })
                     .into_iter()
                     .collect()
                 } else {
                     self.update_terminal_state(pane_id, |terminal| {
-                        terminal.set_hook_authority_with_session_ref(
+                        let previous_authority_alive =
+                            previous_session_authority_alive(terminal, agent_pid);
+                        terminal.set_hook_authority_with_session_ref_and_pid(
                             source,
                             agent_label,
                             state,
@@ -2429,6 +2459,8 @@ impl AppState {
                             custom_status,
                             session_ref,
                             seq,
+                            agent_pid,
+                            previous_authority_alive,
                         )
                     })
                     .into_iter()
@@ -2442,14 +2474,19 @@ impl AppState {
                 seq,
                 session_ref,
                 session_start_source,
+                agent_pid,
             } => self
                 .update_terminal_state(pane_id, |terminal| {
-                    terminal.set_agent_session_ref_for_session_start(
+                    let previous_authority_alive =
+                        previous_session_authority_alive(terminal, agent_pid);
+                    terminal.set_agent_session_ref_for_session_start_with_pid(
                         source,
                         agent_label,
                         session_ref,
                         seq,
                         session_start_source,
+                        agent_pid,
+                        previous_authority_alive,
                     )
                 })
                 .into_iter()
@@ -4429,6 +4466,7 @@ mod tests {
             custom_status: None,
             seq: None,
             session_ref: None,
+            agent_pid: None,
         });
 
         let toast = state.toast.as_ref().unwrap();
@@ -4468,6 +4506,7 @@ mod tests {
             custom_status: None,
             seq: Some(1),
             session_ref: None,
+            agent_pid: None,
         });
         state.handle_app_event(AppEvent::StateChanged {
             pane_id: bg_pane_id,
@@ -4517,6 +4556,7 @@ mod tests {
             custom_status: None,
             seq: Some(1),
             session_ref: crate::agent_resume::AgentSessionRef::id("claude-session"),
+            agent_pid: None,
         });
         let terminal = state.terminals.get(&terminal_id).unwrap();
         assert_eq!(terminal.state, AgentState::Working);
@@ -4600,6 +4640,7 @@ mod tests {
             custom_status: None,
             seq: Some(1),
             session_ref: crate::agent_resume::AgentSessionRef::id("devin-session"),
+            agent_pid: None,
         });
 
         let terminal = state.terminals.get(&terminal_id).unwrap();
@@ -4625,6 +4666,7 @@ mod tests {
             custom_status: None,
             seq: Some(20),
             session_ref: crate::agent_resume::AgentSessionRef::path(first_session),
+            agent_pid: None,
         });
         assert_eq!(first_updates.len(), 1);
         state.session_dirty = false;
@@ -4638,6 +4680,7 @@ mod tests {
             custom_status: None,
             seq: Some(21),
             session_ref: crate::agent_resume::AgentSessionRef::path(second_session),
+            agent_pid: None,
         });
 
         assert!(second_updates.is_empty());

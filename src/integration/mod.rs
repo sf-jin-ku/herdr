@@ -12,7 +12,7 @@ pub(crate) const HERDR_TAB_ID_ENV_VAR: &str = "HERDR_TAB_ID";
 pub(crate) const HERDR_WORKSPACE_ID_ENV_VAR: &str = "HERDR_WORKSPACE_ID";
 const PI_EXTENSION_INSTALL_NAME: &str = "herdr-agent-state.ts";
 const PI_EXTENSION_ASSET: &str = include_str!("assets/pi/herdr-agent-state.ts");
-const PI_INTEGRATION_VERSION: u32 = 2;
+const PI_INTEGRATION_VERSION: u32 = 3;
 const OMP_EXTENSION_INSTALL_NAME: &str = "herdr-omp-agent-state.ts";
 const OMP_EXTENSION_ASSET: &str = include_str!("assets/omp/herdr-agent-state.ts");
 const OMP_INTEGRATION_VERSION: u32 = 3;
@@ -27,7 +27,7 @@ const CLAUDE_HOOK_ASSET: &str = if cfg!(windows) {
 } else {
     include_str!("assets/claude/herdr-agent-state.sh")
 };
-const CLAUDE_INTEGRATION_VERSION: u32 = 6;
+const CLAUDE_INTEGRATION_VERSION: u32 = 7;
 const CLAUDE_CONFIG_DIR_ENV_VAR: &str = "CLAUDE_CONFIG_DIR";
 const CODEX_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
     "herdr-agent-state.ps1"
@@ -39,7 +39,7 @@ const CODEX_HOOK_ASSET: &str = if cfg!(windows) {
 } else {
     include_str!("assets/codex/herdr-agent-state.sh")
 };
-const CODEX_INTEGRATION_VERSION: u32 = 5;
+const CODEX_INTEGRATION_VERSION: u32 = 6;
 const CODEX_HOME_ENV_VAR: &str = "CODEX_HOME";
 const KIMI_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
     "herdr-agent-state.ps1"
@@ -51,7 +51,7 @@ const KIMI_HOOK_ASSET: &str = if cfg!(windows) {
 } else {
     include_str!("assets/kimi/herdr-agent-state.sh")
 };
-const KIMI_INTEGRATION_VERSION: u32 = 3;
+const KIMI_INTEGRATION_VERSION: u32 = 4;
 const KIMI_CODE_HOME_ENV_VAR: &str = "KIMI_CODE_HOME";
 const KIMI_CONFIG_BLOCK_BEGIN: &str = "# >>> herdr kimi integration";
 const KIMI_CONFIG_BLOCK_END: &str = "# <<< herdr kimi integration";
@@ -78,7 +78,7 @@ const COPILOT_HOOK_ASSET: &str = if cfg!(windows) {
 } else {
     include_str!("assets/copilot/herdr-agent-state.sh")
 };
-const COPILOT_INTEGRATION_VERSION: u32 = 2;
+const COPILOT_INTEGRATION_VERSION: u32 = 3;
 const COPILOT_HOME_ENV_VAR: &str = "COPILOT_HOME";
 const COPILOT_HOOK_EVENTS: [&str; 1] = ["SessionStart"];
 const COPILOT_REMOVED_LIFECYCLE_HOOK_EVENTS: [&str; 9] = [
@@ -94,7 +94,7 @@ const COPILOT_REMOVED_LIFECYCLE_HOOK_EVENTS: [&str; 9] = [
 ];
 const DEVIN_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
 const DEVIN_HOOK_ASSET: &str = include_str!("assets/devin/herdr-agent-state.sh");
-const DEVIN_INTEGRATION_VERSION: u32 = 1;
+const DEVIN_INTEGRATION_VERSION: u32 = 2;
 const DEVIN_HOOK_EVENTS: [(&str, &str); 6] = [
     ("SessionStart", "session"),
     ("UserPromptSubmit", "session"),
@@ -121,7 +121,7 @@ const DROID_HOOK_ASSET: &str = if cfg!(windows) {
 } else {
     include_str!("assets/droid/herdr-agent-state.sh")
 };
-const DROID_INTEGRATION_VERSION: u32 = 2;
+const DROID_INTEGRATION_VERSION: u32 = 3;
 const DROID_HOOK_EVENTS: [(&str, &str); 1] = [("SessionStart", "session")];
 const DROID_REMOVED_LIFECYCLE_HOOK_EVENTS: [(&str, &str); 9] = [
     ("SessionStart", "idle"),
@@ -136,16 +136,16 @@ const DROID_REMOVED_LIFECYCLE_HOOK_EVENTS: [(&str, &str); 9] = [
 ];
 const OPENCODE_PLUGIN_INSTALL_NAME: &str = "herdr-agent-state.js";
 const OPENCODE_PLUGIN_ASSET: &str = include_str!("assets/opencode/herdr-agent-state.js");
-const OPENCODE_INTEGRATION_VERSION: u32 = 5;
+const OPENCODE_INTEGRATION_VERSION: u32 = 6;
 const KILO_PLUGIN_INSTALL_NAME: &str = "herdr-agent-state.js";
 const KILO_PLUGIN_ASSET: &str = include_str!("assets/kilo/herdr-agent-state.js");
-const KILO_INTEGRATION_VERSION: u32 = 1;
+const KILO_INTEGRATION_VERSION: u32 = 2;
 const HERMES_PLUGIN_INSTALL_NAME: &str = "herdr-agent-state";
 const HERMES_PLUGIN_MANIFEST_INSTALL_NAME: &str = "plugin.yaml";
 const HERMES_PLUGIN_INIT_INSTALL_NAME: &str = "__init__.py";
 const HERMES_PLUGIN_MANIFEST_ASSET: &str = include_str!("assets/hermes/plugin.yaml");
 const HERMES_PLUGIN_INIT_ASSET: &str = include_str!("assets/hermes/__init__.py");
-const HERMES_INTEGRATION_VERSION: u32 = 2;
+const HERMES_INTEGRATION_VERSION: u32 = 3;
 const QODERCLI_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
     "herdr-agent-state.ps1"
 } else {
@@ -156,7 +156,7 @@ const QODERCLI_HOOK_ASSET: &str = if cfg!(windows) {
 } else {
     include_str!("assets/qodercli/herdr-agent-state.sh")
 };
-const QODERCLI_INTEGRATION_VERSION: u32 = 2;
+const QODERCLI_INTEGRATION_VERSION: u32 = 3;
 const QODERCLI_CONFIG_DIR_ENV_VAR: &str = "QODER_CONFIG_DIR";
 const QODERCLI_HOOK_EVENTS: [(&str, &str); 1] = [("SessionStart", "session")];
 const QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS: [(&str, &str); 12] = [
@@ -175,7 +175,7 @@ const QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS: [(&str, &str); 12] = [
 ];
 const CURSOR_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
 const CURSOR_HOOK_ASSET: &str = include_str!("assets/cursor/herdr-agent-state.sh");
-const CURSOR_INTEGRATION_VERSION: u32 = 1;
+const CURSOR_INTEGRATION_VERSION: u32 = 2;
 const CURSOR_CONFIG_DIR_ENV_VAR: &str = "CURSOR_CONFIG_DIR";
 const INTEGRATION_VERSION_MARKER: &str = "HERDR_INTEGRATION_VERSION=";
 
@@ -4434,7 +4434,7 @@ mod tests {
 
         assert_eq!(claude.path, hook_path);
         assert_eq!(claude.installed_version, Some(1));
-        assert_eq!(claude.expected_version, 6);
+        assert_eq!(claude.expected_version, CLAUDE_INTEGRATION_VERSION);
         assert_eq!(claude.state, IntegrationStatusKind::Outdated);
 
         std::env::remove_var("HOME");
@@ -4464,7 +4464,7 @@ mod tests {
 
         assert_eq!(claude.path, hook_path);
         assert_eq!(claude.installed_version, Some(2));
-        assert_eq!(claude.expected_version, 6);
+        assert_eq!(claude.expected_version, CLAUDE_INTEGRATION_VERSION);
         assert_eq!(claude.state, IntegrationStatusKind::Outdated);
 
         std::env::remove_var("HOME");
@@ -4597,7 +4597,7 @@ mod tests {
 
         assert_eq!(codex.path, hook_path);
         assert_eq!(codex.installed_version, Some(2));
-        assert_eq!(codex.expected_version, 5);
+        assert_eq!(codex.expected_version, CODEX_INTEGRATION_VERSION);
         assert_eq!(codex.state, IntegrationStatusKind::Outdated);
 
         std::env::remove_var("HOME");
@@ -6321,7 +6321,7 @@ mod tests {
     }
 
     #[test]
-    fn cursor_v1_integration_status_is_current() {
+    fn cursor_v1_integration_status_is_outdated() {
         let _lock = integration_env_lock();
         let base = unique_base();
         let cursor_dir = base.join(".cursor");
@@ -6339,8 +6339,9 @@ mod tests {
             .iter()
             .find(|status| status.target == crate::api::schema::IntegrationTarget::Cursor)
             .expect("cursor integration status");
-        assert_eq!(cursor.state, IntegrationStatusKind::Current);
-        assert_eq!(cursor.installed_version, Some(CURSOR_INTEGRATION_VERSION));
+        assert_eq!(cursor.state, IntegrationStatusKind::Outdated);
+        assert_eq!(cursor.installed_version, Some(1));
+        assert_eq!(cursor.expected_version, CURSOR_INTEGRATION_VERSION);
 
         clear_integration_path_env();
         let _ = fs::remove_dir_all(base);

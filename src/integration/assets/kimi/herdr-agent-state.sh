@@ -3,7 +3,7 @@
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # HERDR_INTEGRATION_ID=kimi
-# HERDR_INTEGRATION_VERSION=3
+# HERDR_INTEGRATION_VERSION=4
 
 set -eu
 
@@ -22,7 +22,7 @@ esac
 [ -n "${HERDR_PANE_ID:-}" ] || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 
-HERDR_ACTION="$action" HERDR_HOOK_INPUT_FILE="$hook_input_file" python3 - <<'PY'
+HERDR_ACTION="$action" HERDR_AGENT_PID="$PPID" HERDR_HOOK_INPUT_FILE="$hook_input_file" python3 - <<'PY'
 import json
 import os
 import random
@@ -34,6 +34,11 @@ agent = "kimi"
 action = os.environ.get("HERDR_ACTION", "")
 pane_id = os.environ.get("HERDR_PANE_ID")
 socket_path = os.environ.get("HERDR_SOCKET_PATH")
+# PID of the agent process (the hook shell's parent). Lets herdr tell an
+# interactive session rotation (same process) apart from a nested or
+# headless run reusing the pane env.
+agent_pid = os.environ.get("HERDR_AGENT_PID")
+agent_pid = int(agent_pid) if agent_pid and agent_pid.isdigit() else None
 hook_input_file = os.environ.get("HERDR_HOOK_INPUT_FILE")
 
 if not pane_id or not socket_path:
@@ -76,6 +81,7 @@ elif action == "session":
             "source": source,
             "agent": agent,
             "agent_session_id": agent_session_id,
+            "agent_pid": agent_pid,
             "seq": report_seq,
         },
     }
@@ -89,6 +95,7 @@ else:
     }
     if agent_session_id:
         params["agent_session_id"] = agent_session_id
+    params["agent_pid"] = agent_pid
     request = {
         "id": request_id,
         "method": "pane.report_agent",
